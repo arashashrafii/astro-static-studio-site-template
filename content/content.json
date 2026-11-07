@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "site": {
+    "name": "Your Site",
+    "tagline": "",
+    "email": "",
+    "phone": "",
+    "language": "en",
+    "direction": "ltr"
+  },
+  "pages": [],
+  "collections": [],
+  "items": []
+}

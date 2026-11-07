@@ -1,0 +1,92 @@
+---
+import Layout from '../layouts/Layout.astro';
+import V2PageBlocks from '../components/V2PageBlocks.astro';
+import V2RichText from '../components/V2RichText.astro';
+import V2CollectionListing from '../components/V2CollectionListing.astro';
+import { content } from '../lib/content';
+import { collectionItemDescription, descriptionForDisplay } from '../lib/content-v2';
+
+export function getStaticPaths() {
+  const data = content();
+  const collectionPages = data.collections.flatMap(collection => {
+    const items = data.items.filter(item => item.collectionId === collection.id && item.published);
+    const totalPages = collection.loading === 'pagination' ? Math.max(1, Math.ceil(items.length / collection.pageSize)) : 1;
+    return Array.from({ length: totalPages }, (_, index) => {
+      const page = index + 1;
+      return {
+        params: { slug: page === 1 ? collection.slug : `${collection.slug}/page/${page}` },
+        props: {
+          data,
+          resource: 'collection',
+          collection,
+          items: collection.loading === 'pagination' ? items.slice(index * collection.pageSize, page * collection.pageSize) : items,
+          listPage: page,
+          totalPages,
+        },
+      };
+    });
+  });
+
+  const itemPaths = data.items.filter(item => item.published).map(item => {
+    const collection = data.collections.find(candidate => candidate.id === item.collectionId)!;
+    const siblings = data.items.filter(candidate => candidate.collectionId === collection.id && candidate.published);
+    const index = siblings.findIndex(candidate => candidate.id === item.id);
+    return {
+      params: { slug: `${collection.routeBase}/${item.slug}` },
+      props: { data, resource: 'item', item, collection, previousItem: siblings[index - 1], nextItem: siblings[index + 1] },
+    };
+  });
+
+  const pagePaths = data.pages.filter(page => page.published).map(page => ({
+    params: { slug: page.slug },
+    props: { data, resource: 'page', page },
+  }));
+  return [...pagePaths, ...collectionPages, ...itemPaths];
+}
+
+const { data, resource, page, item, collection, items = [], listPage = 1, totalPages = 1, previousItem, nextItem } = Astro.props;
+const richField = collection?.fields.find(field => field.type === 'text' && field.format === 'rich');
+const imageField = collection?.fields.find(field => field.type === 'gallery');
+const galleryImage = collection?.kind === 'gallery' && imageField ? item?.values[imageField.id]?.[0] : undefined;
+const itemDisplayTitle = item?.title || galleryImage?.title || collection?.name;
+const detailDocument = richField ? item?.values[richField.id] : undefined;
+const detailHasGallery = detailDocument?.blocks?.some(block => block.type === 'gallery') ?? false;
+const pageDescriptionDocument = page?.blocks.find(block => block.type === 'richText')?.document;
+---
+<Layout data={data} title={resource === 'item' ? itemDisplayTitle : resource === 'page' ? page.title : collection.name}>
+  {resource === 'page' && <>
+    <span class="eyebrow">PAGE</span>
+    <h1>{page.title}</h1>
+    {page.description.source === 'manual' && <p class="muted">{descriptionForDisplay(page.description, pageDescriptionDocument)}</p>}
+    <V2PageBlocks blocks={page.blocks} data={data} />
+  </>}
+  {resource === 'collection' && <>
+    <span class="eyebrow">{collection.kind === 'gallery' ? 'GALLERY' : 'COLLECTION'}</span>
+    <h1>{collection.name}</h1>
+    <V2CollectionListing collection={collection} items={items} page={listPage} totalPages={totalPages} />
+  </>}
+  {resource === 'item' && <>
+    <span class="eyebrow">{collection.name}</span>
+    {(item.title || galleryImage?.title) && <h1>{itemDisplayTitle}</h1>}
+    {collection.kind === 'gallery' && <nav class="gallery-item-navigation" aria-label="Gallery navigation">
+      {previousItem ? <a href={`/${collection.routeBase}/${previousItem.slug}/`}>← Previous image</a> : <span />}
+      <a href={`/${collection.slug}/`}>Back to gallery</a>
+      {nextItem ? <a href={`/${collection.routeBase}/${nextItem.slug}/`}>Next image →</a> : <span />}
+    </nav>}
+    {item.coverImage && collection.kind === 'content' && <img class="item-cover" src={item.coverImage.src} alt={item.coverImage.alt} />}
+    {item.description.source === 'manual' && item.description.value && <p class="muted">{collectionItemDescription(collection, item)}</p>}
+    {collection.fields.map(field => {
+      const value = item.values[field.id];
+      if (value === undefined) return null;
+      if (field === richField) return <V2RichText document={value} />;
+      if (field.type === 'gallery') return collection.presetId === 'project' && detailHasGallery ? null : <section class={collection.kind === 'gallery' ? 'gallery-photo-detail' : 'gallery'}>{value.map(image => <figure><img src={image.src} alt={image.alt} />{image.title && <figcaption>{image.title}</figcaption>}</figure>)}</section>;
+      if (field.type === 'category') {
+        const names = field.categories.filter(category => (value as string[]).includes(category.id)).map(category => category.name);
+        return names.length ? <p class="category-list">{names.join(' / ')}</p> : null;
+      }
+      if (field.type === 'link') return <p><a href={value.href}>{value.label}</a></p>;
+      if (field.type === 'text' && field.format === 'plain' && field.label.toLowerCase().includes('date')) return <time class="item-date">{value}</time>;
+      return <p class="prose">{value}</p>;
+    })}
+  </>}
+</Layout>
